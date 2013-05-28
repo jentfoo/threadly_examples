@@ -11,6 +11,8 @@ import java.awt.event.MouseListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.MemoryImageSource;
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
@@ -21,23 +23,23 @@ import org.threadly.concurrent.VirtualRunnable;
 import org.threadly.util.ExceptionUtils;
 
 public class ThreadlyFractal {
-  private static final int windowWidth = Toolkit.getDefaultToolkit().getScreenSize().width;
-  private static final int windowHeight = Toolkit.getDefaultToolkit().getScreenSize().height;
+  private static final BigDecimal windowWidth = getBigDecimal(Toolkit.getDefaultToolkit().getScreenSize().width);
+  private static final BigDecimal windowHeight = getBigDecimal(Toolkit.getDefaultToolkit().getScreenSize().height);
   private static final PriorityScheduledExecutor scheduler;
-  private static final CallableDistributor<Long, int[]> cd;
+  private static final CallableDistributor<BigDecimal, int[]> cd;
   
   static {
     int processors = Runtime.getRuntime().availableProcessors();
     scheduler = new PriorityScheduledExecutor(processors * 2, processors * 2, 
                                               1000, TaskPriority.High, 500);
-    cd = new CallableDistributor<Long, int[]>(processors * 2, scheduler);
+    cd = new CallableDistributor<BigDecimal, int[]>(processors * 2, scheduler);
   }
   
   private static Image image;
-  private static long fractalWidth = windowWidth;
-  private static long fractalHeight = windowHeight;
-  private static long xOffset = 0;
-  private static long yOffset = 0;
+  private static BigDecimal fractalWidth = windowWidth;
+  private static BigDecimal fractalHeight = windowHeight;
+  private static BigDecimal xOffset = getBigDecimal(0);
+  private static BigDecimal yOffset = getBigDecimal(0);
   
   public static void main(String[] args) throws Exception {
     displayFractal();
@@ -54,7 +56,8 @@ public class ThreadlyFractal {
         System.exit(0);
       }
     });
-    frame.setSize(windowWidth, windowHeight);
+    frame.setSize(windowWidth.intValue(), 
+                  windowHeight.intValue());
     
     frame.setVisible(true);
   }
@@ -63,25 +66,25 @@ public class ThreadlyFractal {
     System.out.println("Updating image...Size: " + fractalWidth + "x" + fractalHeight + 
                          ", Position: " + yOffset + "x" + xOffset);
     
-    int[] imageData = new int[windowWidth * windowHeight];
-    for (long y = yOffset; y < windowHeight + yOffset; y++) {
-      final long f_y = y;
+    int[] imageData = new int[windowWidth.multiply(windowHeight).intValue()];
+    for (BigDecimal y = yOffset; y.compareTo(windowHeight.add(yOffset)) < 0; y.add(BigDecimal.ONE)) {
+      final BigDecimal f_y = y;
       cd.submit(y, new Callable<int[]>() {
         @Override
         public int[] call() {
-          int[] result = new int[windowWidth];
+          int[] result = new int[windowWidth.intValue()];
           int index = 0;
-          for (long x = xOffset; x < windowWidth + xOffset; x++) {
+          for (BigDecimal x = xOffset; x.compareTo(windowWidth.add(xOffset)) < 0; x = x.add(BigDecimal.ONE)) {
             result[index] = MandelbrotFractal.calculatePixel(x, f_y, fractalWidth, fractalHeight, 
                                                              0xFF000000);
             // create a little background
-            double a = Math.sqrt(x * (windowWidth / (double)fractalWidth));
-            double b = Math.sqrt(f_y * (windowHeight / (double)fractalHeight));
+            double a = Math.sqrt(x.multiply(windowWidth.divide(fractalWidth)).doubleValue());
+            double b = Math.sqrt(x.multiply(windowHeight.divide(fractalHeight)).doubleValue());
             result[index++] += (int) (a + b);
           }
-          int percentDone = (int)((((double)f_y - yOffset) / windowHeight) * 100);
+          int percentDone = (int)(f_y.subtract(yOffset).divide(windowHeight).doubleValue() * 100);
           // little extra check to avoid reporting multiple times due to int precision
-          if (percentDone != (int)((((double)f_y + 1 - yOffset) / windowHeight) * 100)) {
+          if (percentDone != (int)(f_y.subtract(yOffset.add(BigDecimal.ONE)).divide(windowHeight).doubleValue() * 100)) {
             if (percentDone % 10 == 0) {
               System.out.println(percentDone + " % done");
             }
@@ -92,8 +95,8 @@ public class ThreadlyFractal {
       });
     }
 
-    for (long y = yOffset; y < windowHeight + yOffset; y++) {
-      int indexStart = (int)(windowWidth * (y - yOffset));
+    for (BigDecimal y = yOffset; y.compareTo(windowHeight.add(yOffset)) < 0; y = y.add(BigDecimal.ONE)) {
+      int indexStart = y.subtract(yOffset).multiply(windowWidth).intValue();
       int[] result;
       try {
         result = cd.getNextResult(y).get();
@@ -107,8 +110,12 @@ public class ThreadlyFractal {
     
     System.out.println("Done generating fractal");
     
-    image = Toolkit.getDefaultToolkit().createImage(new MemoryImageSource(windowWidth, windowHeight, 
-                                                                          imageData, 0, windowWidth));
+    image = Toolkit.getDefaultToolkit().createImage(new MemoryImageSource(windowWidth.intValue(), windowHeight.intValue(), 
+                                                                          imageData, 0, windowWidth.intValue()));
+  }
+  
+  private static BigDecimal getBigDecimal(double val) {
+    return new BigDecimal(val, MathContext.UNLIMITED);
   }
 
   private static class FractalCanvas extends Canvas 
@@ -132,8 +139,8 @@ public class ThreadlyFractal {
         
         fractalWidth = windowWidth;
         fractalHeight = windowHeight;
-        xOffset = 0;
-        yOffset = 0;
+        xOffset = getBigDecimal(0);
+        yOffset = getBigDecimal(0);
 
         displayFractal();
       }
@@ -160,29 +167,31 @@ public class ThreadlyFractal {
           @Override
           public void run() {
             // calculate selected distances based off total image size
-            long xDistance = Math.abs(endPointX - startPointX) * (fractalWidth / windowWidth);
-            long yDistance = Math.abs(endPointY - startPointY) * (fractalHeight / windowHeight);
-            if (xDistance == 0 || yDistance == 0) {
+            BigDecimal xDistance = getBigDecimal(Math.abs(endPointX - startPointX)).multiply(fractalWidth.divide(windowWidth));
+            BigDecimal yDistance = getBigDecimal(Math.abs(endPointY - startPointY)).multiply(fractalHeight.divide(windowHeight));
+            if (xDistance.compareTo(BigDecimal.ZERO) == 0 || yDistance.compareTo(BigDecimal.ZERO) == 0) {
               System.out.println("Section too small, ignoring zoom");
               displayFractal();
               return;
             }
             
             // figure out how to scale all our values
-            double aspect = ((double)windowWidth) / windowHeight;
-            double selectedAspect = ((double) xDistance) / yDistance;
-            double scaleFactor;
-            if (selectedAspect > aspect) {  // depend on x
-              scaleFactor = ((double)fractalWidth) / xDistance;
+            BigDecimal aspect = windowWidth.divide(windowHeight);
+            BigDecimal selectedAspect = xDistance.divide(yDistance);
+            BigDecimal scaleFactor;
+            if (selectedAspect.compareTo(aspect) > 0) {  // depend on x
+              scaleFactor = fractalWidth.divide(xDistance);
             } else {  // depend on y
-              scaleFactor = ((double)fractalHeight) / yDistance;
+              scaleFactor = fractalHeight.divide(yDistance);
             }
             
             // update values based off scale factory
-            fractalWidth = (long)(fractalWidth * scaleFactor);
-            fractalHeight = (long)(fractalHeight * scaleFactor);
-            xOffset = (long)((xOffset + (startPointX < endPointX ? startPointX : endPointX)) * scaleFactor);
-            yOffset = (long)((yOffset + (startPointY < endPointY ? startPointY : endPointY)) * scaleFactor);
+            fractalWidth = fractalWidth.multiply(scaleFactor);
+            fractalHeight = fractalHeight.multiply(scaleFactor);
+            BigDecimal xOffsetPoint = getBigDecimal(startPointX < endPointX ? startPointX : endPointX);
+            BigDecimal yOffsetPoint = getBigDecimal(startPointY < endPointY ? startPointY : endPointY);
+            xOffset = xOffset.add(xOffsetPoint).multiply(scaleFactor);
+            yOffset = yOffset.add(yOffsetPoint).multiply(scaleFactor);
             
             displayFractal();
           }
